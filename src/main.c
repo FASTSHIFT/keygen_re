@@ -35,8 +35,8 @@
  *   vert:  1 DLU = 1.8 px
  * ============================================================ */
 
-#define DLU_H(x) ((int)((x)*1.5))
-#define DLU_V(y) ((int)((y)*1.8))
+#define DLU_H(x) ((x)*3 / 2)
+#define DLU_V(y) ((y)*9 / 5)
 
 #define WIN_WIDTH DLU_H(254) /* 381 */
 #define WIN_HEIGHT DLU_V(293) /* 512 */

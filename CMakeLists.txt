@@ -6,8 +6,8 @@ set(CMAKE_C_STANDARD 99)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL2 REQUIRED sdl2)
 
-# c-flod FC14 player sources (core + futurecomposer only)
-set(CFLOD_SOURCES
+# --- Third-party: c-flod (no -Werror, suppress noisy warnings) ---
+add_library(cflod STATIC
     c-flod/flashlib/ByteArray.c
     c-flod/neoart/flod/core/Amiga.c
     c-flod/neoart/flod/core/AmigaChannel.c
@@ -27,18 +27,7 @@ set(CFLOD_SOURCES
     c-flod/neoart/flod/futurecomposer/FCVoice.c
 )
 
-add_executable(keygen_re
-    src/main.c
-    src/keygen.c
-    src/audio.c
-    src/render.c
-    ${CFLOD_SOURCES}
-)
-
-target_include_directories(keygen_re PRIVATE
-    ${SDL2_INCLUDE_DIRS}
-    src
-    src/resources
+target_include_directories(cflod PUBLIC
     c-flod
     c-flod/include
     c-flod/flashlib
@@ -46,13 +35,32 @@ target_include_directories(keygen_re PRIVATE
     c-flod/neoart/flod/core
 )
 
+target_compile_options(cflod PRIVATE -w)
+
+# --- Our sources: strict warnings + -Werror ---
+add_executable(keygen_re
+    src/main.c
+    src/keygen.c
+    src/audio.c
+    src/render.c
+)
+
+target_include_directories(keygen_re PRIVATE
+    ${SDL2_INCLUDE_DIRS}
+    src
+    src/resources
+)
+
 target_link_libraries(keygen_re
+    cflod
     ${SDL2_LIBRARIES}
     m
 )
 
 target_compile_options(keygen_re PRIVATE
     ${SDL2_CFLAGS_OTHER}
-    -Wall -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare
+    -Wall -Werror
+    -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare
     -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
+    -Wno-unknown-pragmas
 )
