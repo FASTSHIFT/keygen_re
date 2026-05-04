@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(edge-demoscene-sdl2 C)
+project(keygen_re C)
 
 set(CMAKE_C_STANDARD 99)
 
@@ -27,7 +27,7 @@ set(CFLOD_SOURCES
     c-flod/neoart/flod/futurecomposer/FCVoice.c
 )
 
-add_executable(edge-demo
+add_executable(keygen_re
     src/main.c
     src/keygen.c
     src/audio.c
@@ -35,7 +35,7 @@ add_executable(edge-demo
     ${CFLOD_SOURCES}
 )
 
-target_include_directories(edge-demo PRIVATE
+target_include_directories(keygen_re PRIVATE
     ${SDL2_INCLUDE_DIRS}
     src
     src/resources
@@ -46,12 +46,12 @@ target_include_directories(edge-demo PRIVATE
     c-flod/neoart/flod/core
 )
 
-target_link_libraries(edge-demo
+target_link_libraries(keygen_re
     ${SDL2_LIBRARIES}
     m
 )
 
-target_compile_options(edge-demo PRIVATE
+target_compile_options(keygen_re PRIVATE
     ${SDL2_CFLAGS_OTHER}
     -Wall -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare
     -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast
