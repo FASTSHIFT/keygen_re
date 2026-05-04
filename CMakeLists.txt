@@ -6,6 +6,23 @@ set(CMAKE_C_STANDARD 99)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL2 REQUIRED sdl2)
 
+# c-flod's Common.h hardcodes INT3 as the x86 `int3` instruction, which the
+# ARM64 (Apple Silicon) assembler doesn't recognize. Patch the submodule
+# header in-place at configure time to make it architecture-aware. Idempotent:
+# skips if already patched.
+set(_cflod_common_h "${CMAKE_CURRENT_SOURCE_DIR}/c-flod/flashlib/Common.h")
+if(EXISTS "${_cflod_common_h}")
+    file(READ "${_cflod_common_h}" _cflod_common_contents)
+    if(NOT _cflod_common_contents MATCHES "__i386__")
+        string(REPLACE
+            "#define INT3 __asm__(\"int3\")"
+            "#if defined(__i386__) || defined(__x86_64__)\n#define INT3 __asm__(\"int3\")\n#else\n#define INT3 ((void)0)\n#endif"
+            _cflod_common_patched "${_cflod_common_contents}")
+        file(WRITE "${_cflod_common_h}" "${_cflod_common_patched}")
+        message(STATUS "Patched c-flod/flashlib/Common.h: made INT3 portable across architectures")
+    endif()
+endif()
+
 # --- Third-party: c-flod (no -Werror, suppress noisy warnings) ---
 add_library(cflod STATIC
     c-flod/flashlib/ByteArray.c
@@ -35,7 +52,7 @@ target_include_directories(cflod PUBLIC
     c-flod/neoart/flod/core
 )
 
-target_compile_options(cflod PRIVATE -w)
+target_compile_options(cflod PRIVATE -w -Wno-incompatible-function-pointer-types)
 
 # --- Our sources: strict warnings + -Werror ---
 add_executable(keygen_re
@@ -56,6 +73,8 @@ target_link_libraries(keygen_re
     ${SDL2_LIBRARIES}
     m
 )
+
+target_link_directories(keygen_re PRIVATE ${SDL2_LIBRARY_DIRS})
 
 target_compile_options(keygen_re PRIVATE
     ${SDL2_CFLAGS_OTHER}
