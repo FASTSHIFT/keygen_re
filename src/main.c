@@ -1,32 +1,31 @@
 /*
- * main.c - Demoscene demo SDL2 port
+ * main.c - Demoscene demo (platform-independent core)
  *
- * A cross-platform SDL2 port of a Win32 demoscene application,
- * featuring FC14 Amiga music playback, CPU software rasterization
- * (starfield, 3D logo, scrolling text), and a retro-style UI.
+ * A cross-platform demoscene application featuring FC14 Amiga music
+ * playback, CPU software rasterization (starfield, 3D logo, scrolling
+ * text), and a retro-style UI.
  *
- * This project is for technical exchange only. The original keygen
- * algorithm has been removed; see keygen.c for details.
+ * All platform interaction goes through platform.h callbacks.
+ * The concrete backend (SDL2) is selected at link time.
  *
  * UI layout from DLGTEMPLATEEX resource (dialog_keygen.bin):
  *   Dialog: 254x293 DLU, "MS Shell Dlg" 8pt
- *   DLU->px: horiz ~1.75, vert ~1.875
  */
 
-#include <SDL.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
+#include "platform.h"
 #include "audio.h"
 #include "font8x8.h"
 #include "keygen.h"
 #include "render.h"
 #include "resources/resources.h"
 
-/* ============================================================
- * Window size derived from original dialog (254x293 DLU)
- * ============================================================ */
+/* Platform lifecycle (provided by platform_sdl2.c) */
+extern void platform_sdl2_init(void);
+extern void platform_sdl2_quit(void);
 
 /* ============================================================
  * Window size derived from original dialog (254x293 DLU)
@@ -39,7 +38,7 @@
 #define DLU_V(y) ((y)*9 / 5)
 
 #define WIN_WIDTH DLU_H(254) /* 381 */
-#define WIN_HEIGHT DLU_V(293) /* 512 */
+#define WIN_HEIGHT DLU_V(293) /* 527 */
 
 /* Colors matching original Win32 theme */
 #define COL_BG 0xFF000000
@@ -159,11 +158,6 @@ static void draw_groupbox(int x, int y, int w, int h,
 
 /* ============================================================
  * Button definitions (pixel coords derived from DLU)
- *
- * Original DLU positions (from dialog resource):
- *   Gen. Serial:   (63,265) 50x14
- *   Open Request:  (135,265) 50x14
- * DLU->px: h*1.75, v*1.875
  * ============================================================ */
 
 typedef struct {
@@ -171,14 +165,8 @@ typedef struct {
     const char* label;
 } Button;
 
-/* Buttons at bottom - matching original dialog:
- *   Gen. Serial:  (63,265) 50x14 DLU
- *   Open Request: (135,265) 50x14 DLU
- */
 static Button btn_gen_serial = { 0 };
 static Button btn_open_request = { 0 };
-
-/* Combo box arrows */
 static Button btn_target_l = { 0 };
 static Button btn_target_r = { 0 };
 static Button btn_license_l = { 0 };
@@ -186,20 +174,167 @@ static Button btn_license_r = { 0 };
 
 static void init_buttons(void)
 {
-    /* Gen. Serial: DLU (63,265) - widen to fit text */
     btn_gen_serial = (Button) { DLU_H(45), DLU_V(265), DLU_H(70), DLU_V(14), "Gen. Serial" };
-    /* Open Request: DLU (135,265) - widen to fit text */
     btn_open_request = (Button) { DLU_H(120), DLU_V(265), DLU_H(75), DLU_V(14), "Open Request" };
-    /* Target combo arrows: right edge of combo (41+175=216, 210) */
     btn_target_l = (Button) { DLU_H(216), DLU_V(210), DLU_H(7), DLU_V(12), "<" };
     btn_target_r = (Button) { DLU_H(223), DLU_V(210), DLU_H(7), DLU_V(12), ">" };
-    /* License combo arrows: right edge of combo (145+72=217, 182) */
     btn_license_l = (Button) { DLU_H(217), DLU_V(182), DLU_H(7), DLU_V(12), "<" };
     btn_license_r = (Button) { DLU_H(224), DLU_V(182), DLU_H(7), DLU_V(12), ">" };
 }
+
 static int point_in(Button* b, int mx, int my)
 {
     return mx >= b->x && mx < b->x + b->w && my >= b->y && my < b->y + b->h;
+}
+
+/* ============================================================
+ * Event handling
+ * ============================================================ */
+
+static int handle_events(void)
+{
+    PlatformEvent ev;
+    while (g_input.poll(&ev)) {
+        switch (ev.type) {
+        case EVT_QUIT:
+            return 0;
+
+        case EVT_MOUSE_DOWN: {
+            int mx = ev.mouse.x, my = ev.mouse.y;
+            if (point_in(&btn_gen_serial, mx, my)) {
+                generate_serial(output_text, 0, target_index, license_index);
+                printf("Serial: %s\n", output_text);
+            } else if (point_in(&btn_open_request, mx, my)) {
+                if (strlen(cid_text) == 11) {
+                    generate_license_key(output_text, cid_text, 1,
+                        target_index, license_index);
+                    printf("License: %s\n", output_text);
+                } else {
+                    snprintf(output_text, sizeof(output_text),
+                        "Invalid Computer ID!!");
+                }
+            } else if (point_in(&btn_target_r, mx, my)) {
+                target_index = (target_index + 1) % 11;
+            } else if (point_in(&btn_target_l, mx, my)) {
+                target_index = (target_index + 10) % 11;
+            } else if (point_in(&btn_license_r, mx, my)) {
+                license_index = (license_index + 1) % 4;
+            } else if (point_in(&btn_license_l, mx, my)) {
+                license_index = (license_index + 3) % 4;
+            }
+            break;
+        }
+
+        case EVT_KEY_DOWN:
+            if (ev.key.sym == PKEY_ESCAPE)
+                return 0;
+            else if (ev.key.sym == PKEY_BACKSPACE) {
+                if (cid_cursor > 0)
+                    cid_text[--cid_cursor] = '\0';
+            }
+            break;
+
+        case EVT_TEXT_INPUT: {
+            char ch = ev.text.text[0];
+            if (cid_cursor < 11 && ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '-')) {
+                if (ch >= 'a' && ch <= 'z')
+                    ch -= 32;
+                cid_text[cid_cursor++] = ch;
+                cid_text[cid_cursor] = '\0';
+            }
+            break;
+        }
+
+        default:
+            break;
+        }
+    }
+    return 1; /* keep running */
+}
+
+/* ============================================================
+ * UI composition
+ * ============================================================ */
+
+static void compose_ui(void)
+{
+    memset(screen_pixels, 0, sizeof(screen_pixels));
+
+    /* Title bar */
+    draw_border(5, 5, WIN_WIDTH - 10, 25, COL_GRAY);
+    draw_string(28, 10, "Keil Generic Keygen - EDGE", COL_GRAY);
+
+    /* 3D animation area */
+    {
+        uint32_t* fb = render_get_framebuffer();
+        int y, x;
+        for (y = 0; y < RENDER_HEIGHT; y++)
+            for (x = 0; x < RENDER_WIDTH; x++) {
+                int sx = RENDER_X + x, sy = RENDER_Y + y;
+                if (sx < WIN_WIDTH && sy < WIN_HEIGHT)
+                    screen_pixels[sy * WIN_WIDTH + sx] = fb[y * RENDER_WIDTH + x] | 0xFF000000;
+            }
+    }
+
+    /* "Keygen" group box - DLU (7,152) 239x136 */
+    draw_groupbox(DLU_H(7), DLU_V(152), DLU_H(239), DLU_V(136), "Keygen", COL_GRAY);
+
+    /* "License Details" group box - DLU (20,168) 211x64 */
+    draw_groupbox(DLU_H(20), DLU_V(168), DLU_H(211), DLU_V(64), "License Details", COL_GRAY);
+
+    /* CID label + input */
+    draw_string(DLU_H(26), DLU_V(184), "CID:", COL_GRAY);
+    draw_border(DLU_H(42), DLU_V(182), DLU_H(63), DLU_V(13), COL_GRAY);
+    draw_rect(DLU_H(42) + 1, DLU_V(182) + 1, DLU_H(63) - 2, DLU_V(13) - 2, COL_EDIT_BG);
+    draw_string(DLU_H(42) + 3, DLU_V(182) + 5, cid_text, COL_WHITE);
+
+    /* "Target" label + license combo */
+    draw_string(DLU_H(120), DLU_V(185), "Target", COL_GRAY);
+    draw_border(DLU_H(145), DLU_V(182), DLU_H(72), DLU_V(13), COL_GRAY);
+    draw_rect(DLU_H(145) + 1, DLU_V(182) + 1, DLU_H(72) - 2, DLU_V(13) - 2, COL_EDIT_BG);
+    draw_string(DLU_H(145) + 3, DLU_V(182) + 5, license_names[license_index], COL_WHITE);
+    /* License arrows */
+    draw_rect(btn_license_l.x, btn_license_l.y, btn_license_l.w, btn_license_l.h, COL_DARKGRAY);
+    draw_string(btn_license_l.x + 2, btn_license_l.y + 6, "<", COL_WHITE);
+    draw_rect(btn_license_r.x, btn_license_r.y, btn_license_r.w, btn_license_r.h, COL_DARKGRAY);
+    draw_string(btn_license_r.x + 2, btn_license_r.y + 6, ">", COL_WHITE);
+
+    /* Product combo (target type) - DLU (41,210) 175x13 */
+    draw_border(DLU_H(41), DLU_V(210), DLU_H(175), DLU_V(13), COL_GRAY);
+    draw_rect(DLU_H(41) + 1, DLU_V(210) + 1, DLU_H(175) - 2, DLU_V(13) - 2, COL_EDIT_BG);
+    draw_string(DLU_H(41) + 3, DLU_V(210) + 5, target_names[target_index], COL_WHITE);
+    /* Target arrows */
+    draw_rect(btn_target_l.x, btn_target_l.y, btn_target_l.w, btn_target_l.h, COL_DARKGRAY);
+    draw_string(btn_target_l.x + 2, btn_target_l.y + 6, "<", COL_WHITE);
+    draw_rect(btn_target_r.x, btn_target_r.y, btn_target_r.w, btn_target_r.h, COL_DARKGRAY);
+    draw_string(btn_target_r.x + 2, btn_target_r.y + 6, ">", COL_WHITE);
+
+    /* Output edit box - DLU (20,240) 211x15 */
+    draw_border(DLU_H(20), DLU_V(240), DLU_H(211), DLU_V(15), COL_GRAY);
+    draw_rect(DLU_H(20) + 1, DLU_V(240) + 1, DLU_H(211) - 2, DLU_V(15) - 2, COL_EDIT_BG);
+    draw_string(DLU_H(20) + 3, DLU_V(240) + 7, output_text, COL_WHITE);
+
+    /* Gen. Serial button */
+    draw_border(btn_gen_serial.x, btn_gen_serial.y,
+        btn_gen_serial.w, btn_gen_serial.h, COL_GRAY);
+    draw_rect(btn_gen_serial.x + 1, btn_gen_serial.y + 1,
+        btn_gen_serial.w - 2, btn_gen_serial.h - 2, COL_DARKGRAY);
+    {
+        int tw = (int)strlen(btn_gen_serial.label) * 8;
+        draw_string(btn_gen_serial.x + (btn_gen_serial.w - tw) / 2,
+            btn_gen_serial.y + 9, btn_gen_serial.label, COL_WHITE);
+    }
+
+    /* Open Request button */
+    draw_border(btn_open_request.x, btn_open_request.y,
+        btn_open_request.w, btn_open_request.h, COL_GRAY);
+    draw_rect(btn_open_request.x + 1, btn_open_request.y + 1,
+        btn_open_request.w - 2, btn_open_request.h - 2, COL_DARKGRAY);
+    {
+        int tw = (int)strlen(btn_open_request.label) * 8;
+        draw_string(btn_open_request.x + (btn_open_request.w - tw) / 2,
+            btn_open_request.y + 9, btn_open_request.label, COL_WHITE);
+    }
 }
 
 /* ============================================================
@@ -208,37 +343,16 @@ static int point_in(Button* b, int mx, int my)
 
 int main(int argc, char* argv[])
 {
-    SDL_Window* window;
-    SDL_Renderer* renderer;
-    SDL_Texture* screen_tex;
-    SDL_Event event;
-    int running = 1;
-
     (void)argc;
     (void)argv;
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+    platform_sdl2_init();
+
+    if (g_video.open("Keil Generic Keygen - EDGE", WIN_WIDTH, WIN_HEIGHT) < 0) {
+        fprintf(stderr, "Failed to open video\n");
+        platform_sdl2_quit();
         return 1;
     }
-
-    window = SDL_CreateWindow(
-        "Keil Generic Keygen - EDGE",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WIN_WIDTH, WIN_HEIGHT, SDL_WINDOW_SHOWN);
-    if (!window) {
-        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
-
-    renderer = SDL_CreateRenderer(window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!renderer)
-        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-
-    screen_tex = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
-        SDL_TEXTUREACCESS_STREAMING, WIN_WIDTH, WIN_HEIGHT);
 
     mt_seed((uint32_t)time(NULL));
     init_buttons();
@@ -247,172 +361,15 @@ int main(int argc, char* argv[])
 
     printf("Keil Generic Keygen - EDGE (Linux SDL2 port)\n");
 
-    while (running) {
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-            case SDL_QUIT:
-                running = 0;
-                break;
-
-            case SDL_MOUSEBUTTONDOWN:
-                if (event.button.button == SDL_BUTTON_LEFT) {
-                    int mx = event.button.x, my = event.button.y;
-
-                    if (point_in(&btn_gen_serial, mx, my)) {
-                        /* btn 1002: Gen. Serial - no CID needed */
-                        generate_serial(output_text, 0,
-                            target_index, license_index);
-                        printf("Serial: %s\n", output_text);
-                    } else if (point_in(&btn_open_request, mx, my)) {
-                        /* btn 1001: Open Request - needs CID */
-                        if (strlen(cid_text) == 11) {
-                            generate_license_key(output_text, cid_text, 1,
-                                target_index, license_index);
-                            printf("License: %s\n", output_text);
-                        } else {
-                            snprintf(output_text, sizeof(output_text),
-                                "Invalid Computer ID!!");
-                        }
-                    } else if (point_in(&btn_target_r, mx, my)) {
-                        target_index = (target_index + 1) % 11;
-                    } else if (point_in(&btn_target_l, mx, my)) {
-                        target_index = (target_index + 10) % 11;
-                    } else if (point_in(&btn_license_r, mx, my)) {
-                        license_index = (license_index + 1) % 4;
-                    } else if (point_in(&btn_license_l, mx, my)) {
-                        license_index = (license_index + 3) % 4;
-                    }
-                }
-                break;
-
-            case SDL_KEYDOWN:
-                if (event.key.keysym.sym == SDLK_ESCAPE)
-                    running = 0;
-                else if (event.key.keysym.sym == SDLK_BACKSPACE) {
-                    if (cid_cursor > 0)
-                        cid_text[--cid_cursor] = '\0';
-                }
-                break;
-
-            case SDL_TEXTINPUT: {
-                char ch = event.text.text[0];
-                if (cid_cursor < 11 && ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '-')) {
-                    if (ch >= 'a' && ch <= 'z')
-                        ch -= 32;
-                    cid_text[cid_cursor++] = ch;
-                    cid_text[cid_cursor] = '\0';
-                }
-                break;
-            }
-            }
-        }
-
-        /* --- Render 3D animation --- */
+    while (handle_events()) {
         render_frame();
-
-        /* --- Compose UI --- */
-        memset(screen_pixels, 0, sizeof(screen_pixels));
-
-        /* Title bar: border + text (original: rc at (5,5) to (width-5, 25)) */
-        draw_border(5, 5, WIN_WIDTH - 10, 25, COL_GRAY);
-        draw_string(28, 10, "Keil Generic Keygen - EDGE", COL_GRAY);
-
-        /* 3D animation area */
-        {
-            uint32_t* fb = render_get_framebuffer();
-            int y, x;
-            for (y = 0; y < RENDER_HEIGHT; y++)
-                for (x = 0; x < RENDER_WIDTH; x++) {
-                    int sx = RENDER_X + x, sy = RENDER_Y + y;
-                    if (sx < WIN_WIDTH && sy < WIN_HEIGHT)
-                        screen_pixels[sy * WIN_WIDTH + sx] = fb[y * RENDER_WIDTH + x] | 0xFF000000;
-                }
-        }
-
-        /* --- "Keygen" group box --- */
-        /* DLU (7,152) 239x136 */
-        draw_groupbox(DLU_H(7), DLU_V(152), DLU_H(239), DLU_V(136), "Keygen", COL_GRAY);
-
-        /* --- "License Details" group box --- */
-        /* DLU (20,168) 211x64 */
-        draw_groupbox(DLU_H(20), DLU_V(168), DLU_H(211), DLU_V(64), "License Details", COL_GRAY);
-
-        /* CID label + input */
-        /* DLU: label (26,184), edit (42,182) 63x13 */
-        draw_string(DLU_H(26), DLU_V(184), "CID:", COL_GRAY);
-        draw_border(DLU_H(42), DLU_V(182), DLU_H(63), DLU_V(13), COL_GRAY);
-        draw_rect(DLU_H(42) + 1, DLU_V(182) + 1, DLU_H(63) - 2, DLU_V(13) - 2, COL_EDIT_BG);
-        draw_string(DLU_H(42) + 3, DLU_V(182) + 5, cid_text, COL_WHITE);
-
-        /* "Target" label + license combo (C51/C251/C166/ARM) */
-        /* DLU: label (120,185), combo (145,182) 72x13 */
-        draw_string(DLU_H(120), DLU_V(185), "Target", COL_GRAY);
-        draw_border(DLU_H(145), DLU_V(182), DLU_H(72), DLU_V(13), COL_GRAY);
-        draw_rect(DLU_H(145) + 1, DLU_V(182) + 1, DLU_H(72) - 2, DLU_V(13) - 2, COL_EDIT_BG);
-        draw_string(DLU_H(145) + 3, DLU_V(182) + 5, license_names[license_index], COL_WHITE);
-        /* Arrows */
-        draw_rect(btn_license_l.x, btn_license_l.y,
-            btn_license_l.w, btn_license_l.h, COL_DARKGRAY);
-        draw_string(btn_license_l.x + 2, btn_license_l.y + 6, "<", COL_WHITE);
-        draw_rect(btn_license_r.x, btn_license_r.y,
-            btn_license_r.w, btn_license_r.h, COL_DARKGRAY);
-        draw_string(btn_license_r.x + 2, btn_license_r.y + 6, ">", COL_WHITE);
-
-        /* Product combo (target type) */
-        /* DLU: (41,210) 175x13 */
-        draw_border(DLU_H(41), DLU_V(210), DLU_H(175), DLU_V(13), COL_GRAY);
-        draw_rect(DLU_H(41) + 1, DLU_V(210) + 1, DLU_H(175) - 2, DLU_V(13) - 2, COL_EDIT_BG);
-        draw_string(DLU_H(41) + 3, DLU_V(210) + 5, target_names[target_index], COL_WHITE);
-        /* Arrows */
-        draw_rect(btn_target_l.x, btn_target_l.y,
-            btn_target_l.w, btn_target_l.h, COL_DARKGRAY);
-        draw_string(btn_target_l.x + 2, btn_target_l.y + 6, "<", COL_WHITE);
-        draw_rect(btn_target_r.x, btn_target_r.y,
-            btn_target_r.w, btn_target_r.h, COL_DARKGRAY);
-        draw_string(btn_target_r.x + 2, btn_target_r.y + 6, ">", COL_WHITE);
-
-        /* Output edit box */
-        /* DLU: (20,240) 211x15 */
-        draw_border(DLU_H(20), DLU_V(240), DLU_H(211), DLU_V(15), COL_GRAY);
-        draw_rect(DLU_H(20) + 1, DLU_V(240) + 1, DLU_H(211) - 2, DLU_V(15) - 2, COL_EDIT_BG);
-        draw_string(DLU_H(20) + 3, DLU_V(240) + 7, output_text, COL_WHITE);
-
-        /* Gen. Serial button */
-        draw_border(btn_gen_serial.x, btn_gen_serial.y,
-            btn_gen_serial.w, btn_gen_serial.h, COL_GRAY);
-        draw_rect(btn_gen_serial.x + 1, btn_gen_serial.y + 1,
-            btn_gen_serial.w - 2, btn_gen_serial.h - 2, COL_DARKGRAY);
-        {
-            int tw = (int)strlen(btn_gen_serial.label) * 8;
-            draw_string(btn_gen_serial.x + (btn_gen_serial.w - tw) / 2,
-                btn_gen_serial.y + 9, btn_gen_serial.label, COL_WHITE);
-        }
-
-        /* Open Request button */
-        draw_border(btn_open_request.x, btn_open_request.y,
-            btn_open_request.w, btn_open_request.h, COL_GRAY);
-        draw_rect(btn_open_request.x + 1, btn_open_request.y + 1,
-            btn_open_request.w - 2, btn_open_request.h - 2, COL_DARKGRAY);
-        {
-            int tw = (int)strlen(btn_open_request.label) * 8;
-            draw_string(btn_open_request.x + (btn_open_request.w - tw) / 2,
-                btn_open_request.y + 9, btn_open_request.label, COL_WHITE);
-        }
-
-        /* Present */
-        SDL_UpdateTexture(screen_tex, NULL, screen_pixels,
-            WIN_WIDTH * sizeof(uint32_t));
-        SDL_RenderClear(renderer);
-        SDL_RenderCopy(renderer, screen_tex, NULL, NULL);
-        SDL_RenderPresent(renderer);
-
-        SDL_Delay(25);
+        compose_ui();
+        g_video.present(screen_pixels, WIN_WIDTH, WIN_HEIGHT);
+        g_input.delay_ms(25);
     }
 
     audio_shutdown();
-    SDL_DestroyTexture(screen_tex);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    g_video.close();
+    platform_sdl2_quit();
     return 0;
 }

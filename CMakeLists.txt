@@ -45,7 +45,24 @@ target_compile_options(cflod PRIVATE
     -include "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cflod_common_shim.h"
 )
 
-# --- Our sources: strict warnings + -Werror ---
+# --- Platform backend: SDL2 (the ONLY target that links SDL) ---
+add_library(platform_sdl2 STATIC src/platform_sdl2.c)
+
+target_include_directories(platform_sdl2 PRIVATE
+    ${SDL2_INCLUDE_DIRS}
+    src
+)
+
+target_link_libraries(platform_sdl2 PRIVATE ${SDL2_LIBRARIES})
+target_link_directories(platform_sdl2 PRIVATE ${SDL2_LIBRARY_DIRS})
+
+target_compile_options(platform_sdl2 PRIVATE
+    ${SDL2_CFLAGS_OTHER}
+    -Wall -Werror
+    -Wno-unused-parameter
+)
+
+# --- Our sources: strict warnings + -Werror, NO SDL dependency ---
 add_executable(keygen_re
     src/main.c
     src/keygen.c
@@ -54,13 +71,13 @@ add_executable(keygen_re
 )
 
 target_include_directories(keygen_re PRIVATE
-    ${SDL2_INCLUDE_DIRS}
     src
     src/resources
 )
 
 target_link_libraries(keygen_re
     cflod
+    platform_sdl2
     ${SDL2_LIBRARIES}
     m
 )
@@ -68,7 +85,6 @@ target_link_libraries(keygen_re
 target_link_directories(keygen_re PRIVATE ${SDL2_LIBRARY_DIRS})
 
 target_compile_options(keygen_re PRIVATE
-    ${SDL2_CFLAGS_OTHER}
     -Wall -Werror
     -Wno-unused-parameter -Wno-unused-variable -Wno-sign-compare
     -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast

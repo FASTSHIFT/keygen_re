@@ -1,9 +1,12 @@
 /*
- * audio.c - Audio subsystem using c-flod FC14 player + SDL2
+ * audio.c - Audio subsystem using c-flod FC14 player
+ *
+ * Platform-independent: uses g_audio callbacks from platform.h
+ * instead of calling SDL directly.
  */
 
 #include "audio.h"
-#include <SDL.h>
+#include "platform.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -18,7 +21,6 @@ static struct Amiga amiga;
 static struct FCPlayer fc_player;
 static struct ByteArray wave_stream;
 static char wave_buffer[8192]; /* c-flod expects char* */
-static SDL_AudioDeviceID audio_dev;
 static int audio_running;
 
 /* Access CorePlayer through the inheritance chain:
@@ -27,7 +29,7 @@ static int audio_running;
 #define CORE_PLAYER (fc_player.super.super)
 #define CORE_MIXER (amiga.super)
 
-static void audio_callback(void* userdata, Uint8* stream, int len)
+static void audio_fill(void* userdata, uint8_t* stream, int len)
 {
     (void)userdata;
     int filled = 0;
@@ -53,7 +55,6 @@ static void audio_callback(void* userdata, Uint8* stream, int len)
 
 int audio_init(const uint8_t* tune_data, int tune_size)
 {
-    SDL_AudioSpec want, have;
     struct ByteArray tune_stream;
 
     /* Initialize c-flod Amiga hardware emulation */
@@ -84,25 +85,14 @@ int audio_init(const uint8_t* tune_data, int tune_size)
     /* Initialize player */
     CORE_PLAYER.initialize(&CORE_PLAYER);
 
-    /* Open SDL audio */
-    memset(&want, 0, sizeof(want));
-    want.freq = 44100;
-    want.format = AUDIO_S16SYS;
-    want.channels = 2;
-    want.samples = 2048;
-    want.callback = audio_callback;
-
-    audio_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (audio_dev == 0) {
-        fprintf(stderr, "audio: SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+    /* Open audio device via platform backend */
+    if (g_audio.open(44100, 2, 2048, audio_fill, NULL) < 0) {
+        fprintf(stderr, "audio: failed to open audio device\n");
         return -1;
     }
 
-    printf("audio: opened device (freq=%d, channels=%d, samples=%d)\n",
-        have.freq, have.channels, have.samples);
-
     /* Start playback */
-    SDL_PauseAudioDevice(audio_dev, 0);
+    g_audio.pause(0);
     audio_running = 1;
 
     return 0;
@@ -111,8 +101,8 @@ int audio_init(const uint8_t* tune_data, int tune_size)
 void audio_shutdown(void)
 {
     if (audio_running) {
-        SDL_PauseAudioDevice(audio_dev, 1);
-        SDL_CloseAudioDevice(audio_dev);
+        g_audio.pause(1);
+        g_audio.close();
         audio_running = 0;
     }
 }
