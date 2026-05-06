@@ -12,10 +12,11 @@
  *   Dialog: 254x293 DLU, "MS Shell Dlg" 8pt
  */
 
-#include <stdio.h>
+#include <stdio.h>  /* snprintf for UI string formatting */
 #include <string.h>
 #include <time.h>
 
+#include "platform_api.h"
 #include "platform.h"
 #include "audio.h"
 #include "font8x8.h"
@@ -203,12 +204,12 @@ static int handle_events(void)
             int mx = ev.mouse.x, my = ev.mouse.y;
             if (point_in(&btn_gen_serial, mx, my)) {
                 generate_serial(output_text, 0, target_index, license_index);
-                printf("Serial: %s\n", output_text);
+                platform_log(PLATFORM_LOG_INFO, "Serial: %s", output_text);
             } else if (point_in(&btn_open_request, mx, my)) {
                 if (strlen(cid_text) == 11) {
                     generate_license_key(output_text, cid_text, 1,
                         target_index, license_index);
-                    printf("License: %s\n", output_text);
+                    platform_log(PLATFORM_LOG_INFO, "License: %s", output_text);
                 } else {
                     snprintf(output_text, sizeof(output_text),
                         "Invalid Computer ID!!");
@@ -349,7 +350,7 @@ int main(int argc, char* argv[])
     platform_sdl2_init();
 
     if (g_video.open("Keil Generic Keygen - EDGE", WIN_WIDTH, WIN_HEIGHT) < 0) {
-        fprintf(stderr, "Failed to open video\n");
+        platform_log(PLATFORM_LOG_ERROR, "Failed to open video");
         platform_sdl2_quit();
         return 1;
     }
@@ -359,7 +360,7 @@ int main(int argc, char* argv[])
     render_init();
     audio_init(tune_data, sizeof(tune_data));
 
-    printf("Keil Generic Keygen - EDGE (Linux SDL2 port)\n");
+    platform_log(PLATFORM_LOG_INFO, "Keil Generic Keygen - EDGE (Linux SDL2 port)");
 
     while (handle_events()) {
         render_frame();

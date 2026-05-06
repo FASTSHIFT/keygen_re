@@ -6,8 +6,10 @@
  * original submodule header is short-circuited whenever it gets pulled in
  * transitively, so we don't have to touch any file inside c-flod/.
  *
- * The only functional change vs. upstream is making INT3 architecture-aware:
- * AppleClang / ARM64 rejects the raw x86 `int3` mnemonic.
+ * Changes vs. upstream:
+ *   1. INT3 is architecture-aware (ARM64 stubs it out).
+ *   2. DEBUGP and fprintf/malloc/free are redirected through platform_api
+ *      hooks so the entire cflod library is MCU-portable without libc stdio.
  */
 #ifndef COMMON_H
 #define COMMON_H
@@ -15,13 +17,39 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <stdio.h>
+
+/* Pull in platform API for logging and memory */
+#include "platform_api.h"
 
 #define null NULL
 
 typedef float Number;
 
-#define DEBUGP(format, ...) fprintf(stderr, format, __VA_ARGS__)
+/*
+ * Redirect c-flod's debug prints through platform logging.
+ * On MCU this goes to UART/RTT; on hosted platforms to stderr.
+ */
+#define DEBUGP(format, ...) platform_log(PLATFORM_LOG_DEBUG, format, __VA_ARGS__)
+
+/*
+ * c-flod uses fprintf(stderr, ...) for error diagnostics in ByteArray.c.
+ * We macro-redirect these to platform_log so no stdio is required at link time.
+ * Note: c-flod never uses fprintf for anything other than stderr diagnostics.
+ */
+#include <stdio.h>  /* still needed for FILE* type in case headers reference it */
+#define fprintf(stream, ...) (platform_log(PLATFORM_LOG_WARN, __VA_ARGS__), 0)
+#define perror(msg) platform_log(PLATFORM_LOG_ERROR, "%s", (msg))
+
+/*
+ * Redirect malloc/free through platform API so MCU targets can use a static
+ * pool. ByteArray_new() is the only caller and is currently unused, but we
+ * cover it for completeness.
+ */
+#include <stdlib.h>  /* for size_t, original code expects stdlib symbols */
+#undef malloc
+#undef free
+#define malloc(sz) platform_malloc(sz)
+#define free(ptr) platform_free(ptr)
 
 #if defined(__i386__) || defined(__x86_64__)
 #  define INT3 __asm__("int3")

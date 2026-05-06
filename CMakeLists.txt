@@ -40,10 +40,21 @@ target_include_directories(cflod PUBLIC
     c-flod/neoart/flod/core
 )
 
+target_include_directories(cflod PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src  # for platform_api.h used by the shim
+)
+
 target_compile_options(cflod PRIVATE
     -w -Wno-incompatible-function-pointer-types
     -include "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cflod_common_shim.h"
 )
+
+target_link_libraries(cflod PRIVATE platform_api)
+
+# --- Platform API: logging + memory (portable primitives) ---
+# On hosted platforms, link platform_api_hosted. MCU targets substitute their own.
+add_library(platform_api STATIC src/platform_api_hosted.c)
+target_include_directories(platform_api PUBLIC src)
 
 # --- Platform backend: SDL2 (the ONLY target that links SDL) ---
 add_library(platform_sdl2 STATIC src/platform_sdl2.c)
@@ -77,6 +88,7 @@ target_include_directories(keygen_re PRIVATE
 
 target_link_libraries(keygen_re
     cflod
+    platform_api
     platform_sdl2
     ${SDL2_LIBRARIES}
     m

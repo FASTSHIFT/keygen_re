@@ -6,8 +6,8 @@
  */
 
 #include "audio.h"
+#include "platform_api.h"
 #include "platform.h"
-#include <stdio.h>
 #include <string.h>
 
 /* c-flod headers */
@@ -76,18 +76,18 @@ int audio_init(const uint8_t* tune_data, int tune_size)
 
     CorePlayer_load(&CORE_PLAYER, &tune_stream);
     if (!CORE_PLAYER.version) {
-        fprintf(stderr, "audio: failed to load FC14 module\n");
+        platform_log(PLATFORM_LOG_ERROR, "audio: failed to load FC14 module");
         return -1;
     }
 
-    printf("audio: loaded FC14 module (version %d)\n", CORE_PLAYER.version);
+    platform_log(PLATFORM_LOG_INFO, "audio: loaded FC14 module (version %d)", CORE_PLAYER.version);
 
     /* Initialize player */
     CORE_PLAYER.initialize(&CORE_PLAYER);
 
     /* Open audio device via platform backend */
     if (g_audio.open(44100, 2, 2048, audio_fill, NULL) < 0) {
-        fprintf(stderr, "audio: failed to open audio device\n");
+        platform_log(PLATFORM_LOG_ERROR, "audio: failed to open audio device");
         return -1;
     }
 
