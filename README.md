@@ -4,8 +4,9 @@
 
 > 如果你学过嵌入式，你大概率被这个注册机的魔性音乐和 3D 动画吓过一跳——然后再也忘不掉。
 >
-> 本项目将这个经典的 demoscene 程序从 Win32 移植到 Linux/SDL2，保留了完整的
-> FC14 Amiga 音乐播放、CPU 软件光栅化渲染和复古风格 UI，**注册算法已移除**。
+> 本项目将这个经典的 demoscene 程序从 Win32 移植到跨平台架构（默认 SDL2 后端），
+> 保留了完整的 FC14 Amiga 音乐播放、CPU 软件光栅化渲染和复古风格 UI，
+> **注册算法已移除**。核心逻辑与平台完全解耦，可移植到 MCU 等裸机环境。
 
 ![screenshot](docs/image.png)
 
@@ -19,36 +20,61 @@
 - 🪟 **Win32 原生 GUI**：对话框 + 控件，典型的 2000 年代 crackme 风格
 
 本项目通过逆向工程分析原始 PE32 二进制文件，将上述三个子系统完整移植到
-Linux/SDL2 平台，作为一个 **Win32 → SDL2 跨平台移植的技术案例**。
+跨平台架构，作为一个 **Win32 → 可移植 C99 跨平台移植的技术案例**。
 
 ## 系统架构
 
+项目采用分层设计，核心逻辑与平台完全解耦，可移植到 MCU 等裸机环境：
+
 ```mermaid
 graph TB
-    subgraph "应用层"
-        MAIN["main.c<br/>SDL2 主循环 + UI 绘制"]
-    end
-
-    subgraph "三大子系统"
-        AUDIO["audio.c<br/>FC14 音乐播放<br/>SDL2 Audio 回调"]
+    subgraph "应用层（平台无关）"
+        MAIN["main.c<br/>主循环 + UI 绘制"]
+        AUDIO["audio.c<br/>FC14 音乐播放"]
         RENDER["render.c<br/>CPU 软件光栅化<br/>星空 / 3D Logo / 滚动字幕"]
         KEYGEN["keygen.c<br/>随机 Stub<br/>（原始算法已移除）"]
     end
 
-    subgraph "外部依赖"
-        SDL2["SDL2<br/>窗口 / 音频 / 输入"]
-        CFLOD["c-flod<br/>Amiga 音乐格式解码库"]
+    subgraph "平台抽象层"
+        PLATFORM_H["platform.h<br/>音频 / 视频 / 输入<br/>回调表接口"]
+        PLATFORM_API["platform_api.h<br/>日志 / 内存分配<br/>可替换原语"]
     end
 
-    MAIN --> AUDIO
-    MAIN --> RENDER
-    MAIN --> KEYGEN
-    AUDIO --> SDL2
+    subgraph "后端实现（可替换）"
+        SDL2_BE["platform_sdl2.c<br/>SDL2 后端"]
+        HOSTED["platform_api_hosted.c<br/>stdio + stdlib"]
+        MCU["platform_xxx.c<br/>MCU 后端（UART/静态池）"]
+    end
+
+    subgraph "外部依赖"
+        SDL2["SDL2"]
+        CFLOD["c-flod<br/>Amiga 音乐解码"]
+    end
+
+    MAIN --> PLATFORM_H
+    MAIN --> PLATFORM_API
+    AUDIO --> PLATFORM_H
+    AUDIO --> PLATFORM_API
     AUDIO --> CFLOD
-    RENDER --> MAIN
-    MAIN --> SDL2
+    CFLOD --> PLATFORM_API
+
+    PLATFORM_H -.-> SDL2_BE
+    PLATFORM_H -.-> MCU
+    PLATFORM_API -.-> HOSTED
+    PLATFORM_API -.-> MCU
+
+    SDL2_BE --> SDL2
 ```
 
+### 分层说明
+
+| 层 | 文件 | 职责 | SDL 依赖 |
+|----|------|------|----------|
+| 应用层 | `main.c`, `audio.c`, `render.c`, `keygen.c` | 业务逻辑 | ❌ 无 |
+| 平台接口 | `platform.h` | 音频/视频/输入回调表 | ❌ 无 |
+| 平台原语 | `platform_api.h` | `platform_log` / `platform_malloc` / `platform_free` | ❌ 无 |
+| SDL2 后端 | `platform_sdl2.c` | 唯一包含 `<SDL.h>` 的文件 | ✅ |
+| 托管原语 | `platform_api_hosted.c` | stdio + stdlib 实现 | ❌ 无 |
 
 ### 原始 Win32 → SDL2 映射
 
@@ -61,10 +87,10 @@ graph LR
         W4["FindResource / LoadResource<br/>PE 资源加载"]
     end
 
-    subgraph "SDL2 替代"
-        S1["SDL_OpenAudioDevice<br/>+ 回调函数"]
-        S2["SDL_UpdateTexture<br/>+ SDL_RenderCopy"]
-        S3["SDL2 自绘 UI<br/>8x8 像素字体"]
+    subgraph "平台抽象层"
+        S1["g_audio.open()<br/>+ fill 回调"]
+        S2["g_video.present()<br/>帧缓冲提交"]
+        S3["g_input.poll()<br/>+ 自绘 UI"]
         S4["C 数组嵌入<br/>编译期资源"]
     end
 
@@ -79,22 +105,29 @@ graph LR
 ```
 keygen_re/
 ├── src/
-│   ├── main.c              # SDL2 主循环、UI 绘制
-│   ├── audio.c/h           # FC14 音乐播放（c-flod 封装）
-│   ├── render.c/h          # CPU 软件光栅化引擎
-│   ├── keygen.c/h          # 随机 Stub（原始算法已移除）
-│   ├── font8x8.h           # 8x8 像素位图字体
-│   └── resources/          # 从 PE 提取的二进制资源
-│       ├── resources.h     # FC14 音乐数据 + UI 常量
-│       └── render_data.h   # 纹理 / 字体位图 / Logo 数据
-├── c-flod/                 # Amiga 音乐格式解码库（git submodule）
+│   ├── main.c                  # 主循环、UI 绘制（平台无关）
+│   ├── audio.c/h               # FC14 音乐播放（c-flod 封装）
+│   ├── render.c/h              # CPU 软件光栅化引擎
+│   ├── keygen.c/h              # 随机 Stub（原始算法已移除）
+│   ├── platform.h              # 平台后端接口（音频/视频/输入回调表）
+│   ├── platform_api.h          # 平台原语接口（日志/内存）
+│   ├── platform_sdl2.c         # SDL2 后端实现
+│   ├── platform_api_hosted.c   # 托管平台原语（stdio + stdlib）
+│   ├── font8x8.h              # 8x8 像素位图字体
+│   └── resources/             # 从 PE 提取的二进制资源
+│       ├── resources.h        # FC14 音乐数据 + UI 常量
+│       └── render_data.h      # 纹理 / 字体位图 / Logo 数据
+├── c-flod/                    # Amiga 音乐格式解码库（git submodule）
+├── cmake/
+│   └── cflod_common_shim.h   # c-flod 兼容性 shim（不修改子模块）
 ├── docs/
-│   ├── reverse-engineering-report.md  # 逆向工程报告
-│   └── image.png           # 运行截图
+│   ├── sdl-decouple-plan.md   # SDL 解耦设计文档
+│   ├── reverse-engineering-report.md
+│   └── image.png
 ├── scripts/
-│   └── format.sh           # clang-format 自动格式化脚本
-├── .clang-format           # WebKit 风格
-├── .github/workflows/      # GitHub Actions CI
+│   └── format.sh             # clang-format 自动格式化脚本
+├── .clang-format              # WebKit 风格
+├── .github/workflows/         # GitHub Actions CI
 └── CMakeLists.txt
 ```
 
@@ -180,9 +213,19 @@ cmake --build build --parallel
 
 ### Q: macOS / Windows 能编译吗？
 
-理论上可以——所有代码都基于 SDL2 和标准 C99，没有平台特定依赖。
-但目前只在 Linux 上测试过。macOS 需要 Homebrew 安装 SDL2，
-Windows 需要 MSYS2/MinGW 或 vcpkg 配置 SDL2。欢迎提 PR。
+可以。所有核心代码基于标准 C99，不依赖任何平台特定 API。SDL2 后端已在
+macOS 14 (Apple Silicon) + AppleClang 17 上验证通过。Windows 需要
+MSYS2/MinGW 或 vcpkg 配置 SDL2。
+
+### Q: 能移植到 MCU / 嵌入式平台吗？
+
+可以。项目架构专门为此设计：
+
+1. 实现 `platform_log` / `platform_malloc` / `platform_free`（重定向到 UART、RTT、静态内存池等）
+2. 实现 `platform.h` 中的音频/视频/输入回调表（对接 I2S DAC、LCD 驱动、按键扫描等）
+3. 链接你的实现替代 `platform_sdl2.c` + `platform_api_hosted.c`
+
+核心代码（`main.c`、`audio.c`、`render.c`）无需任何修改。
 
 ### Q: 逆向工程报告里有什么？
 
