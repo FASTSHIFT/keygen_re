@@ -90,9 +90,18 @@ static void sdl_video_present(const uint32_t* pixels, int w, int h)
 
 static void sdl_video_close(void)
 {
-    if (s_tex) { SDL_DestroyTexture(s_tex); s_tex = NULL; }
-    if (s_ren) { SDL_DestroyRenderer(s_ren); s_ren = NULL; }
-    if (s_win) { SDL_DestroyWindow(s_win); s_win = NULL; }
+    if (s_tex) {
+        SDL_DestroyTexture(s_tex);
+        s_tex = NULL;
+    }
+    if (s_ren) {
+        SDL_DestroyRenderer(s_ren);
+        s_ren = NULL;
+    }
+    if (s_win) {
+        SDL_DestroyWindow(s_win);
+        s_win = NULL;
+    }
 }
 
 /* ============================================================

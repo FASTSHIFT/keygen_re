@@ -12,15 +12,15 @@
  *   Dialog: 254x293 DLU, "MS Shell Dlg" 8pt
  */
 
-#include <stdio.h>  /* snprintf for UI string formatting */
+#include <stdio.h> /* snprintf for UI string formatting */
 #include <string.h>
 #include <time.h>
 
-#include "platform_api.h"
-#include "platform.h"
 #include "audio.h"
 #include "font8x8.h"
 #include "keygen.h"
+#include "platform.h"
+#include "platform_api.h"
 #include "render.h"
 #include "resources/resources.h"
 

@@ -6,8 +6,8 @@
  */
 
 #include "audio.h"
-#include "platform_api.h"
 #include "platform.h"
+#include "platform_api.h"
 #include <string.h>
 
 /* c-flod headers */

@@ -39,9 +39,15 @@ typedef enum {
 typedef struct {
     EventType type;
     union {
-        struct { int x, y, button; } mouse;
-        struct { int sym; } key;
-        struct { char text[32]; } text;
+        struct {
+            int x, y, button;
+        } mouse;
+        struct {
+            int sym;
+        } key;
+        struct {
+            char text[32];
+        } text;
     };
 } PlatformEvent;
 
